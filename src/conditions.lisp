@@ -36,3 +36,31 @@ file does not exist."))
 match the current content. For write it is signalled inside the
 CL-STACK-PATHLIB:CONTENT-HASH-MISMATCH handler, so pathlib's OVERWRITE and
 USE-CURRENT restarts are available."))
+
+;;; --- shell tools (H2c) -------------------------------------------------------
+
+(define-condition shell-timeout (agent:tool-timeout)
+  ((command :initarg :command :reader shell-timeout-command :initform nil
+            :documentation "The command line as the model gave it.")
+   (timeout :initarg :timeout :reader shell-timeout-timeout :initform nil
+            :documentation "The timeout that expired, in milliseconds.")
+   (output :initarg :output :reader shell-timeout-output :initform ""
+           :documentation "The output so far, cleaned and truncated as a
+result would be."))
+  (:documentation "A foreground bash command ran past its timeout. Signalled
+while the command is still running, with two restarts: CONTINUE waits another
+timeout, RUN-IN-BACKGROUND turns the command into a background job and makes
+the call return the job-start text. When the condition leaves the call
+unhandled, the command's process tree is killed."))
+
+(define-condition job-not-found (agent:tool-input-error)
+  ((id :initarg :id :reader job-not-found-id :initform nil
+       :documentation "The job_id argument as given."))
+  (:documentation "job_output / job_input / job_kill named no job of this
+SHELL-TOOLS source."))
+
+(define-condition job-not-running (agent:tool-input-error)
+  ((id :initarg :id :reader job-not-running-id :initform nil)
+   (status :initarg :status :reader job-not-running-status :initform nil
+           :documentation ":EXITED or :KILLED."))
+  (:documentation "job_input on a job that has already finished."))
