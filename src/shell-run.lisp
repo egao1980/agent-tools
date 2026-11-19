@@ -437,10 +437,15 @@ reservation; it is released (car set to NIL) first."
           (t (%input-error "~a must be an integer from ~d to ~d, got ~a"
                            key low high (%describe-value v))))))
 
+(defun %native-directory (path)
+  "PATH (a local pathlib path) as the OS names it: C:\\dir\\ on Windows, where
+the POSIX form /C:/dir/ is not a usable directory, and /dir/ elsewhere."
+  (uiop:native-namestring (uiop:ensure-directory-pathname (fs:path-pathname path))))
+
 (defun %workdir-directory (tools workdir)
   "The native directory a command with WORKDIR (NIL: the root) starts in."
   (if (null workdir)
-      (fs:as-posix (shell-tools-root tools))
+      (%native-directory (shell-tools-root tools))
       (let ((path (resolve-tool-path (%shell-files tools) workdir)))
         (unless (fs:exists-p path)
           (%input-error "workdir ~a not found; give an existing directory relative to the project root"
@@ -448,7 +453,7 @@ reservation; it is released (car set to NIL) first."
         (unless (fs:directory-p path)
           (%input-error "workdir ~a is not a directory; give a directory relative to the project root"
                         workdir))
-        (fs:as-posix path))))
+        (%native-directory path))))
 
 (defun %find-job (tools id)
   (or (find-shell-job tools id)
