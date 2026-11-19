@@ -1,5 +1,5 @@
 (defsystem "agent-tools"
-  :version "0.1.0"
+  :version "0.1.1"
   :description "Coding agent file tools (read, write, edit, multi_edit, glob, grep, ls) as an ai-agent-protocol tool source over any cl-stack-pathlib filesystem"
   :author "egao1980"
   :license "MIT"
