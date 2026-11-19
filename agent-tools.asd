@@ -18,7 +18,10 @@
                (:file "conditions")
                (:file "file-tools")
                (:file "source")
+               (:file "shell-output")
+               (:file "shell-scan")
                (:file "shell-tools")
+               (:file "shell-run")
                (:file "shell-source"))
   :in-order-to ((test-op (test-op "agent-tools/tests"))))
 

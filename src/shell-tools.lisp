@@ -7,12 +7,20 @@
 ;;; anywhere, through process-protocol pipes. SHELL-COMMAND-RESOURCES turns a
 ;;; command line into permission resources.
 ;;;
-;;; The classes, readers and constants are fixed; every function and method
-;;; body that does work calls %NOT-IMPLEMENTED. The implementation removes
-;;; %NOT-IMPLEMENTED and every call to it.
-
-(defun %not-implemented (what)
-  (error "agent-tools: ~a is not implemented (H2c contract)" what))
+;;; This file: the classes, the constructor and the facade (dispatch,
+;;; close, the job list). Runs, jobs and the tool handlers are in
+;;; src/shell-run.lisp; cleaning and truncation in src/shell-output.lisp;
+;;; the scanner in src/shell-scan.lisp.
+;;;
+;;; Invariants:
+;;; - I-owner: a job's pty or process handle is touched only by that job's
+;;;   pump thread; other threads post requests to the job's mailbox.
+;;; - I-ids: a job id exists iff a command spawned and was registered; ids
+;;;   count from 1 with no gaps (a refused start takes none).
+;;; - I-kill: when control leaves a foreground bash call other than through
+;;;   RUN-IN-BACKGROUND, its command is killed before the call returns.
+;;; - I-restart: SHELL-TIMEOUT is signalled inside RESTART-CASE in the
+;;;   calling thread and nothing between the signal and the caller unwinds.
 
 (defparameter +shell-tool-names+
   '("bash" "job_output" "job_input" "job_kill" "job_list")
@@ -37,8 +45,16 @@ command line is appended as one last argument. (\"/bin/sh\" \"-c\") on Unix,
 basename of its first element, case-insensitively and without a .exe suffix,
 is sh, bash, dash, zsh, ksh, mksh or ash → :POSIX; cmd → :CMD; anything else
 → :OPAQUE."
-  (declare (ignore shell))
-  (%not-implemented 'shell-dialect))
+  (let* ((program (if (consp shell) (first shell) shell))
+         (name (if (stringp program) program ""))
+         (slash (position-if (lambda (c) (find c "/\\")) name :from-end t))
+         (base (string-downcase (subseq name (if slash (1+ slash) 0)))))
+    (when (and (> (length base) 4) (string= ".exe" base :start2 (- (length base) 4)))
+      (setf base (subseq base 0 (- (length base) 4))))
+    (cond ((member base '("sh" "bash" "dash" "zsh" "ksh" "mksh" "ash") :test #'string=)
+           :posix)
+          ((string= base "cmd") :cmd)
+          (t :opaque))))
 
 ;;; --- jobs ------------------------------------------------------------------
 
@@ -99,12 +115,47 @@ older unread output is dropped.")
           :documentation "Enabled tool names, a subset of +SHELL-TOOL-NAMES+
 in that order.")
    (closed-p :initform nil :reader shell-tools-closed-p
-             :documentation "True after CLOSE-SHELL-TOOLS."))
+             :documentation "True after CLOSE-SHELL-TOOLS.")
+   ;; Implementation slots.
+   (files :initarg :files :reader %shell-files
+          :documentation "A FILE-TOOLS over the same root with no tools, so
+workdir resolves through RESOLVE-TOOL-PATH exactly like H2b paths.")
+   (lock :initform (bt2:make-lock :name "shell-tools") :reader %shell-lock
+         :documentation "Guards JOBS, COUNTER, RESERVED, LIVE and CLOSED-P.")
+   (jobs :initform '() :accessor %shell-jobs
+         :documentation "Registered jobs, newest first.")
+   (counter :initform 0 :accessor %shell-counter
+            :documentation "The last job number given out.")
+   (reserved :initform 0 :accessor %shell-reserved
+             :documentation "Background starts between the max-jobs check and
+their registration.")
+   (live :initform '() :accessor %shell-live
+         :documentation "Every job whose command has not finished, foreground
+runs included; CLOSE-SHELL-TOOLS kills them."))
   (:documentation "Tool source running shell commands in one local directory
 tree. The implementation may add slots (jobs, a lock, the id counter)."))
 
 (defun shell-tools-p (x)
   (typep x 'shell-tools))
+
+
+;;; --- constructor -----------------------------------------------------------
+
+(defun %local-filesystem ()
+  "The local filesystem pathlib's PATHs share (PATH-EQUAL compares the
+filesystem by identity)."
+  (if (typep fs:*filesystem* 'fs:local-filesystem)
+      fs:*filesystem*
+      fs::*local-filesystem*))
+
+(defun %check-env (env)
+  (unless (and (listp env)
+               (every (lambda (e)
+                        (and (consp e) (stringp (car e)) (plusp (length (car e)))
+                             (typep (cdr e) '(or null string))))
+                      env))
+    (error 'type-error :datum env
+                       :expected-type '(or null (cons (cons string (or null string)) list)))))
 
 (defun make-shell-tools (&key root (executor :auto) shell dialect env
                            (needs-approval t) (default-timeout 120000)
@@ -119,9 +170,70 @@ A missing ROOT signals CL-STACK-PATHLIB:PATH-NOT-FOUND; a ROOT that is not a
 directory signals CL-STACK-PATHLIB:PATH-ERROR; a PATH on another filesystem
 than the local one, an unknown tool name, an unknown executor or dialect, or
 DEFAULT-TIMEOUT above MAX-TIMEOUT signal an ERROR."
-  (declare (ignore root executor shell dialect env needs-approval default-timeout
-                   max-timeout max-output max-jobs max-job-buffer tools))
-  (%not-implemented 'make-shell-tools))
+  (check-type executor (member :auto :pty :process))
+  (check-type dialect (or null (member :posix :cmd :opaque)))
+  (check-type default-timeout (integer 1))
+  (check-type max-timeout (integer 1))
+  (check-type max-output (integer 1))
+  (check-type max-jobs (integer 1))
+  (check-type max-job-buffer (integer 1))
+  (check-type tools list)
+  (%check-env env)
+  (when (> default-timeout max-timeout)
+    (error "make-shell-tools: :default-timeout ~d is above :max-timeout ~d"
+           default-timeout max-timeout))
+  (let ((shell (or shell (default-shell))))
+    (unless (and (consp shell) (every #'stringp shell) (plusp (length (first shell))))
+      (error 'type-error :datum shell :expected-type '(cons string list)))
+    (let ((unknown (remove-if (lambda (n) (member n +shell-tool-names+ :test #'equal)) tools)))
+      (when unknown
+        (error "make-shell-tools: unknown tool name~p ~{~s~^, ~}; known: ~{~a~^, ~}"
+               (length unknown) unknown +shell-tool-names+)))
+    (let ((executor (if (eq executor :auto)
+                        #+(or windows win32) :process #-(or windows win32) :pty
+                        executor)))
+      #+(or windows win32)
+      (when (eq executor :pty)
+        (error "make-shell-tools: :executor :pty is not supported on Windows in 0.2.0; use :process"))
+      (let* ((path (cond ((fs:path-p root)
+                          (unless (typep (fs:path-filesystem root) 'fs:local-filesystem)
+                            (error "make-shell-tools: the root ~a is not on the local filesystem; commands run in OS directories"
+                                   (fs:as-posix root)))
+                          root)
+                         ((or (stringp root) (pathnamep root))
+                          (fs:ensure-path root :filesystem (%local-filesystem)))
+                         (t (error 'type-error :datum root
+                                               :expected-type '(or string pathname fs:path)))))
+             ;; Signals PATH-NOT-FOUND / PATH-ERROR, and gives the truename.
+             (files (make-file-tools :root path :tools '())))
+        (make-instance 'shell-tools
+                       :root (file-tools-root files)
+                       :files files
+                       :executor executor
+                       :shell (copy-list shell)
+                       :dialect (or dialect (shell-dialect shell))
+                       :env (copy-alist env)
+                       :needs-approval needs-approval
+                       :default-timeout default-timeout
+                       :max-timeout max-timeout
+                       :max-output max-output
+                       :max-jobs max-jobs
+                       :max-job-buffer max-job-buffer
+                       :names (remove-if-not (lambda (n) (member n tools :test #'equal))
+                                             +shell-tool-names+))))))
+
+;;; --- facade ----------------------------------------------------------------
+
+(defparameter +shell-tool-handlers+
+  '(("bash" . %tool-bash) ("job_output" . %tool-job-output) ("job_input" . %tool-job-input)
+    ("job_kill" . %tool-job-kill) ("job_list" . %tool-job-list)))
+
+(defun %shell-enabled-p (tools name)
+  (and (stringp name) (member name (shell-tools-names tools) :test #'string=) t))
+
+(defun %closed-error (name)
+  (error 'agent:tool-unavailable
+         :message (format nil "~a cannot run: this shell-tools source is closed" name)))
 
 (defun call-shell-tool (tools name arguments)
   "Run tool NAME of TOOLS synchronously on ARGUMENTS (a JSON object string or
@@ -130,51 +242,35 @@ AI-AGENT-PROTOCOL:TOOL-FAILURE subtypes; a foreground timeout signals
 SHELL-TIMEOUT with its restarts; a name that is not enabled signals
 AI-AGENT-PROTOCOL:AGENT-UNKNOWN-TOOL; any call after CLOSE-SHELL-TOOLS
 signals AI-AGENT-PROTOCOL:TOOL-UNAVAILABLE."
-  (declare (ignore tools name arguments))
-  (%not-implemented 'call-shell-tool))
+  (unless (%shell-enabled-p tools name)
+    ;; An AGENT-CONDITION, not an ERROR; ERROR still makes it impossible to
+    ;; ignore.
+    (error 'agent:agent-unknown-tool
+           :name name
+           :message (format nil "~a is not enabled on this shell-tools source (enabled: ~{~a~^, ~})"
+                            name (shell-tools-names tools))))
+  (when (shell-tools-closed-p tools)
+    (%closed-error name))
+  (funcall (cdr (assoc name +shell-tool-handlers+ :test #'string=))
+           tools (%decode-arguments arguments)))
 
 (defun close-shell-tools (tools)
   "Kill every running job of TOOLS (status :KILLED) and refuse later calls.
 Idempotent. → NIL."
-  (declare (ignore tools))
-  (%not-implemented 'close-shell-tools))
+  (let ((live (bt2:with-lock-held ((%shell-lock tools))
+                (unless (shell-tools-closed-p tools)
+                  (setf (slot-value tools 'closed-p) t)
+                  (copy-list (%shell-live tools))))))
+    (dolist (job live)
+      (%kill-job job 5)))
+  nil)
 
 (defun shell-tools-jobs (tools)
   "→ the SHELL-JOBs of TOOLS, oldest first, finished ones included."
-  (declare (ignore tools))
-  (%not-implemented 'shell-tools-jobs))
+  (bt2:with-lock-held ((%shell-lock tools))
+    (reverse (%shell-jobs tools))))
 
 (defun find-shell-job (tools id)
   "→ the SHELL-JOB of TOOLS named ID, or NIL."
-  (declare (ignore tools id))
-  (%not-implemented 'find-shell-job))
-
-;;; --- pure helpers ----------------------------------------------------------
-
-(defun shell-command-resources (command &key (dialect :posix) (workdir ".") root)
-  "→ the permission resources of COMMAND (a command line string) for
-AI-AGENT-PROTOCOL rules, in order of appearance, without duplicates:
-\"bash:<words>\" and \"program:<argv0>\" per simple command, \"cd:<path>\",
-\"read:<path>\", \"write:<path>\" for the paths it changes to, reads or
-writes, and \"*\" (last) when the scan met a construct it does not model.
-NIL for a blank or comment-only command. Never signals.
-WORKDIR: root-relative POSIX directory the command starts in; when it is not
-\".\" the first resource is \"cd:<workdir>\". ROOT: the root's absolute POSIX
-string, or NIL; with it, absolute paths under the root and relative paths
-that leave it are reported root-relative and absolute respectively."
-  (declare (ignore command dialect workdir root))
-  (%not-implemented 'shell-command-resources))
-
-(defun clean-shell-output (output)
-  "→ OUTPUT (an octet vector, decoded as UTF-8 with U+FFFD for each invalid
-byte, or a string) as text for the model: CR LF → LF; ANSI escape sequences
-removed; in each line only the text after its last remaining CR kept; other
-control characters except TAB and LF removed."
-  (declare (ignore output))
-  (%not-implemented 'clean-shell-output))
-
-(defun truncate-shell-output (string max)
-  "→ STRING when it has at most MAX characters; else its head and tail in
-whole lines around a \"[truncated: <n> characters omitted; ...]\" line."
-  (declare (ignore string max))
-  (%not-implemented 'truncate-shell-output))
+  (and (stringp id)
+       (find id (shell-tools-jobs tools) :key #'shell-job-id :test #'equal)))
