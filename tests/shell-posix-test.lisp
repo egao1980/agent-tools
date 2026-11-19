@@ -53,9 +53,11 @@
     (bash tools "read a; read b; echo \"$a+$b\"" "run_in_background" t)
     (let ((r (shell tools "job_input" "job_id" "job-1" "input" (nl "1"))))
       (ok (equal "[job job-1 running]" (last-line r))))
-    (shell tools "job_input" "job_id" "job-1" "input" (nl "2"))
-    (let ((r (job-output tools "job-1" "wait_ms" 20000)))
-      (ok (has "1+2" r))
+    ;; job_input (wait_ms 0) returns the output that is already there, which
+    ;; can include "1+2" on a fast machine: check both reads together.
+    (let* ((r1 (shell tools "job_input" "job_id" "job-1" "input" (nl "2")))
+           (r (job-output tools "job-1" "wait_ms" 20000)))
+      (ok (has "1+2" (concatenate 'string r1 r)))
       (ok (equal "[job job-1 exited with code 0]" (last-line r))))))
 
 (deftest-executors job-output-is-incremental
