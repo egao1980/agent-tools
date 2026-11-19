@@ -66,3 +66,35 @@
       (ok (typep (failure (tool tools "grep" "pattern" "inside" "path" "..")) 'path-outside-root))
       (ok (typep (failure (tool tools "ls" "path" "..")) 'path-outside-root))
       (ok (equal "above" (text-at root "above.txt"))))))
+
+;;; Drive designators, UNC and backslash paths are refused on every OS: a
+;;; segment with ":" (C:, a stream name) or NUL could name a path outside the
+;;; root once the backend parses it (issue #1).
+
+(defparameter *foreign-path-arguments*
+  (list "C:/x" "c:\\x" "C:x" "a/C:/x" "a\\C:\\x" "a/b:c"
+        "\\\\server\\share\\x" "\\x" "..\\..\\x"
+        (format nil "a~cb" (code-char 0))))
+
+(deftest-backends resolve-tool-path-foreign-syntax
+  (with-tools (tools root kind) '(("src/a.txt" "x"))
+    (dolist (arg *foreign-path-arguments*)
+      (let ((c (failure (resolve-tool-path tools arg))))
+        (ok (typep c 'a:tool-input-error) (format nil "~s is refused" arg))
+        (ok (has "root" (message c)) (format nil "~s: the message names the root" arg))))
+    (ok (equal "src/a.txt" (nth-value 1 (resolve-tool-path tools "src\\a.txt")))
+        "a relative backslash path is still inside")))
+
+(deftest-backends tools-refuse-foreign-syntax
+  (with-root (root kind)
+    (make-tree root '(("w/a.txt" "inside")))
+    (let ((tools (make-file-tools :root (p:join root "w/"))))
+      (dolist (arg *foreign-path-arguments*)
+        (ok (typep (failure (tool tools "write" "file_path" arg "content" "x"))
+                   'a:tool-input-error)
+            (format nil "write ~s is refused" arg))
+        (ok (typep (failure (tool tools "read" "file_path" arg)) 'a:tool-input-error)
+            (format nil "read ~s is refused" arg)))
+      (ok (equal '("w") (list-names root)) "nothing is written beside the root")
+      (ok (equal '("a.txt") (list-names (p:join root "w/"))) "nothing is written inside")
+      (ok (equal "inside" (text-at root "w/a.txt"))))))

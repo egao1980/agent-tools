@@ -153,26 +153,45 @@ parser also treats as a separator)."
 (defun %join-segments (segments)
   (format nil "~{~a~^/~}" segments))
 
+(defun %absolute-designator-p (designator)
+  "DESIGNATOR names an absolute path: it starts with / or \\ (a UNC
+\\\\server\\share too), or with a drive letter (C:/x, C:\\x, C:x)."
+  (let ((c (char designator 0)))
+    (or (char= c #\/)
+        (char= c #\\)
+        (and (alpha-char-p c)
+             (> (length designator) 1)
+             (char= (char designator 1) #\:)))))
+
 (defun resolve-tool-path (tools designator &key (allow-root t))
   "Resolve the path argument DESIGNATOR (a string: relative to the root, or
-absolute and under it) on TOOLS. → (values path relative) where PATH is an
-absolute CL-STACK-PATHLIB:PATH and RELATIVE the root-relative POSIX string
-(\".\" for the root itself). Outside the root signals PATH-OUTSIDE-ROOT; an
-empty string, or the root when ALLOW-ROOT is NIL, signals
+absolute and under it; / and \\ both separate segments) on TOOLS.
+→ (values path relative) where PATH is an absolute CL-STACK-PATHLIB:PATH and
+RELATIVE the root-relative POSIX string (\".\" for the root itself). Outside the root signals PATH-OUTSIDE-ROOT; an
+empty string, a NUL, a segment below the root holding ':' (a drive or
+stream designator), or the root when ALLOW-ROOT is NIL, signals
 AI-AGENT-PROTOCOL:TOOL-INPUT-ERROR."
   (unless (stringp designator)
     (%input-error "the path must be a string, got ~a" (%describe-value designator)))
   (when (zerop (length designator))
     (%input-error "the path is empty; give a path relative to the project root"))
+  (when (find (code-char 0) designator)
+    (%input-error "~s contains a NUL character; use a path relative to the project root ~a"
+                  designator (fs:as-posix (file-tools-root tools))))
   (let* ((root (file-tools-root tools))
          (rsegs (%root-segments tools))
-         (full (%normalize (if (char= (char designator 0) #\/)
+         (full (%normalize (if (%absolute-designator-p designator)
                                (%segments designator)
                                (append rsegs (%segments designator))))))
     (unless (%prefix-p rsegs full)
       (%outside tools designator))
     (let* ((tail (nthcdr (length rsegs) full))
            (rel (if tail (%join-segments tail) ".")))
+      ;; Below the root a ":" is a drive (C:) or stream (a:b) designator:
+      ;; FS:JOIN may parse it as a path outside the root (issue #1).
+      (when (some (lambda (s) (find #\: s)) tail)
+        (%input-error "~a has a ':' in a path segment (a drive or stream designator); use a path relative to the project root ~a"
+                      designator (fs:as-posix root)))
       (when (and (null tail) (not allow-root))
         (%input-error "~a is the project root, not a file; give a file path" designator))
       ;; Each existing prefix: a symlink must stay under the root. A dangling
