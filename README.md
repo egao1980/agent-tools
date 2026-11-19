@@ -4,7 +4,7 @@ The coding agent's file tools — `read`, `write`, `edit`, `multi_edit`, `glob`,
 
 Brief: [`cl-stack/docs/capabilities/agent-tools.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools.md). Plan: Track H, milestone H2b. Shell and pty tools are H2c.
 
-**Status: contract.** `agent-tools/tests` (Rove) is the spec. Every function and method calls `%not-implemented`, so the tests load and fail.
+Version **0.1.0** — milestone H2b: `read`, `write`, `edit`, `multi_edit`, `glob`, `grep` and `ls` as an ai-agent-protocol tool source over any cl-stack-pathlib filesystem, confined to a root, with compare-and-swap writes (`expected_hash`), unified-diff edit previews, gitignore-aware listings and `path:` permission resources. Shell tools are milestone H2c.
 
 ```lisp
 (asdf:load-system "agent-tools")
