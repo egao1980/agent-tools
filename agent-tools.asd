@@ -8,8 +8,8 @@
                (:version "diff-protocol" "0.2.0")
                "json-protocol"
                "json-backend-jzon"
-               (:version "process-protocol" "0.3.0")
-               (:version "process-backend-uiop" "0.2.0")
+               (:version "process-protocol" "0.4.0")
+               (:version "process-backend-uiop" "0.3.0")
                (:version "pty-protocol" "0.1.0")
                (:version "pty-backend-native" "0.2.1"))
   :serial t

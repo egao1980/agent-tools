@@ -201,8 +201,7 @@ terminal: HUP, then KILL, then the master is closed."
       (ecase (%job-executor job)
         (:pty (pty:pty-close h))
         (:process
-         (when (proc:alive-p h)
-           (proc:kill h :force t))
+         (%kill-process h)
          (let ((in (proc:stdin h)))
            (when (and in (open-stream-p in))
              (handler-case (close in :abort t)
@@ -304,8 +303,7 @@ tools' live set. Called by the pump thread."
            (%request-done job (third r)))
           (:kill
            (%mark-killed job)
-           (when (proc:alive-p h)
-             (proc:kill h :force t)))))
+           (%kill-process h))))
       (unless exit-time
         (let ((code (proc:exit-code h)))
           (when code
@@ -342,6 +340,20 @@ a NIL value unsets."
          :message (format nil "the shell ~a cannot start: ~a"
                           (first (shell-tools-shell tools)) reason)))
 
+(defun %process-groups-p ()
+  "True when the process backend can start a child in its own group, so that a
+kill reaches the shell's whole process tree (process-protocol 0.4.0)."
+  (proc:supports-p :process-group))
+
+(defun %kill-process (h)
+  "Stop the :PROCESS executor's command H and its descendants. Started in its
+own group (see %PROCESS-GROUPS-P), the whole tree goes — also after the shell
+itself has exited, while a grandchild still runs; otherwise only H."
+  (if (%process-groups-p)
+      (proc:kill h :force t :tree t)
+      (when (proc:alive-p h)
+        (proc:kill h :force t))))
+
 (defun %spawn-handle (tools argv directory)
   (let ((overrides (%shell-overrides tools)))
     (handler-case
@@ -357,7 +369,8 @@ a NIL value unsets."
           (:process
            (proc:launch argv :input nil :output nil :error-output :output
                              :element-type :octets :directory directory
-                             :env overrides :env-mode :merge)))
+                             :env overrides :env-mode :merge
+                             :process-group (%process-groups-p))))
       (pty:pty-spawn-error (c) (%cannot-start tools c))
       (proc:process-error (c) (%cannot-start tools c)))))
 
