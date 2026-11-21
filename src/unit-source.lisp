@@ -54,7 +54,7 @@
        (%object-schema
         `(("ref" "string" "A ref \"<unit>:<segment>:<line>\" from unit_search.")
           ("unit" "string" ,+unit-arg-description+)
-          ("start_line" "integer" "First line to show (default: 10 before the ref, or the first line)." "minimum" 1)
+          ("start_line" "integer" "First line to show (default: 10 before the ref, fewer when limit is small so the ref stays centred, or the first line)." "minimum" 1)
           ("limit" "integer" "Lines to show (default 40 with a ref, 200 otherwise)."
                    "minimum" 1 "maximum" ,(unit-tools-max-read-lines tools))
           ("streams" ,@streams))))

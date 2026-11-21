@@ -23,6 +23,38 @@
       (ok (equal (format nil "[more: unit_read unit \"~a\" start_line ~d]" id (+ l 30))
                  (car (last lines)))))))
 
+(deftest unit-read-by-ref-with-a-small-limit
+  ;; agent-tools#6: a limit too small for 10 lines of context centres the ref,
+  ;; so the ref line is always in the window and marked.
+  (with-units (tools sup)
+    (let* ((u (thread-lines sup (numbered-texts 100)))
+           (id (sup:unit-id u))
+           (r (record-of u "text line 050"))
+           (l (sup:log-record-line r))
+           (last (sup:log-last-line u))
+           (ref (ref-of id r)))
+      (flet ((window (limit) (result-lines (ucall tools "unit_read" "ref" ref "limit" limit))))
+        (loop for (limit before) in '((1 0) (2 0) (3 1) (8 3) (9 4) (20 9) (21 10) (25 10) (40 10))
+              do (let ((lines (window limit)))
+                   (ok (equal (format nil "unit ~a (exited): lines ~d-~d of ~d"
+                                      id (- l before) (+ l (- limit before 1)) last)
+                              (first lines))
+                       (format nil "limit ~d starts ~d lines before the ref" limit before))
+                   (ok (member (log-line ">" l "text line 050") lines :test #'equal)
+                       (format nil "limit ~d: the ref line is marked" limit))))
+        (let ((lines (window 8)))
+          (ok (equal (log-line " " (- l 3) "text line 047") (second lines)))
+          (ok (equal (format nil "[more: unit_read unit \"~a\" start_line ~d]" id (+ l 5))
+                     (car (last lines))))))
+      (ok (equal (format nil "unit ~a (exited): lines ~d-~d of ~d" id (- l 2) (+ l 5) last)
+                 (first (result-lines (ucall tools "unit_read" "ref" ref "limit" 8 "start_line" (- l 2)))))
+          "start_line still overrides")
+      (let ((first-ref (ref-of id (record-of u "text line 002"))))
+        (ok (member (log-line ">" 3 "text line 002")
+                    (result-lines (ucall tools "unit_read" "ref" first-ref "limit" 5))
+                    :test #'equal)
+            "near the start of the log the ref is still marked")))))
+
 (deftest unit-read-by-range
   (with-units (tools sup)
     (let* ((u (thread-lines sup (numbered-texts 20)))

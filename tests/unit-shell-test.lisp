@@ -134,6 +134,21 @@ temp state directory) and KEYS; UNITS: a UNIT-TOOLS over SUP."
                        (sup:unit-id u))
                result)))))
 
+(deftest supervised-job-output-truncation-names-the-unit
+  ;; agent-tools#7: a background job is a unit with a log too, so its truncated
+  ;; job_output points at unit_read / unit_search, not at redirecting.
+  (with-supervised-shell (tools sup root :max-output 2000)
+    (bash tools (lines-command 3000) "run_in_background" t)
+    (let* ((job (first (shell-tools-jobs tools)))
+           (id (shell-job-id job))
+           (result (job-output tools id "wait_ms" 30000)))
+      (ok (has (format nil "characters omitted; the full output is in unit ~a: use unit_read or unit_search]" id)
+               result))
+      (ok (not (has "redirect the output to a file and use read or grep" result)))
+      (ok (has (format nil "line1~%line2~%") result) "the head is kept")
+      (ok (has (format nil "line3000~%[job ~a exited with code 0]" id) result) "the tail and the status")
+      (ok (<= (length result) (+ 2000 (length (format nil "[job ~a exited with code 0]" id)) 1))))))
+
 (deftest supervised-close-stops-the-scope
   (with-supervised-shell (tools sup root)
     (bash tools (sleep-command 60) "run_in_background" t)
