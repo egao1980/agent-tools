@@ -509,10 +509,13 @@ MAX-OUTPUT."
               (values k line))
             (values unit nil))
       (let* ((v (%resolve-log tools key :given (or ref unit) :arg (if ref "ref" "unit")))
-             (start (%ranged-arg args "start_line" 1 most-positive-fixnum
-                                 (if mark (max 1 (- mark 10)) 1)))
              (limit (%ranged-arg args "limit" 1 (unit-tools-max-read-lines tools)
                                  (if mark 40 200)))
+             ;; A ref window starts 10 lines before the ref; a limit too small for
+             ;; that centres the ref instead, so the ref line is always shown
+             ;; (agent-tools#6).
+             (start (%ranged-arg args "start_line" 1 most-positive-fixnum
+                                 (if mark (max 1 (- mark (min 10 (floor (1- limit) 2)))) 1)))
              (log (%vlog-log v))
              (status (%vlog-status v))
              (max (unit-tools-max-output tools)))
@@ -903,7 +906,7 @@ it never comes before output still unread."
     (bt2:with-lock-held ((%unit-job-lock job))
       (let ((finished (sup:unit-finished-p u)))
         (multiple-value-bind (text dropped) (%unit-job-take tools job finished)
-          (%with-status (%output-text tools text dropped)
+          (%with-status (%output-text tools text dropped :unit-id (shell-job-id job))
                         (if finished
                             (%status-line job)
                             (format nil "[job ~a running]" (shell-job-id job)))))))))

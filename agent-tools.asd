@@ -1,5 +1,5 @@
 (defsystem "agent-tools"
-  :version "0.3.0"
+  :version "0.3.1"
   :description "Coding agent tools as ai-agent-protocol tool sources: files (read, write, edit, multi_edit, glob, grep, ls) over any cl-stack-pathlib filesystem, shell (bash, background jobs, command scanner for permissions), and supervisor units (list, search, read, tail, control their logs)"
   :author "egao1980"
   :license "MIT"
@@ -12,8 +12,8 @@
                (:version "process-backend-uiop" "0.3.0")
                (:version "pty-protocol" "0.1.0")
                (:version "pty-backend-native" "0.2.1")
-               (:version "supervisor-protocol" "0.3.0")
-               (:version "supervisor-protocol/search" "0.3.0"))
+               (:version "supervisor-protocol" "0.3.1")
+               (:version "supervisor-protocol/search" "0.3.1"))
   :serial t
   :pathname "src"
   :components ((:file "package")

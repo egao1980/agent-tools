@@ -114,15 +114,21 @@ for the next take."
               (%job-dropped job) 0))
       (values chunk dropped (%status-line job)))))
 
-(defun %output-text (tools chunk dropped)
+(declaim (ftype function %truncate-in-unit)) ; src/unit-run.lisp
+
+(defun %output-text (tools chunk dropped &key unit-id)
   "CHUNK cleaned, after a dropped-output notice when DROPPED > 0, capped at
-the tools' max-output, final newlines removed."
+the tools' max-output, final newlines removed. UNIT-ID (a job under a
+supervisor): the omitted-characters line names that unit, as the supervised
+foreground bash does (%TRUNCATE-IN-UNIT, agent-tools#7)."
   (let* ((clean (clean-shell-output chunk))
          (text (if (plusp dropped)
                    (format nil "[truncated: ~d characters dropped; read job_output more often or redirect the output to a file]~%~a"
                            dropped clean)
                    clean)))
-    (string-right-trim '(#\Newline) (truncate-shell-output text (shell-tools-max-output tools)))))
+    (if unit-id
+        (%truncate-in-unit (string-right-trim '(#\Newline) text) (shell-tools-max-output tools) unit-id)
+        (string-right-trim '(#\Newline) (truncate-shell-output text (shell-tools-max-output tools))))))
 
 (defun %with-status (output status)
   (if (zerop (length output))

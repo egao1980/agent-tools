@@ -10,7 +10,7 @@ The coding agent's tools as [`ai-agent-protocol`](https://github.com/egao1980/ai
 
 Briefs: [`agent-tools.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools.md) (H2b), [`agent-tools-shell.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools-shell.md) (H2c), [`agent-tools-units.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools-units.md) (H8c). Plan: Track H, milestones H2 and H8.
 
-Version **0.3.0** (in progress: H8c `unit-tools`; its functions signal "not implemented" until that slice lands). 0.1.1 is milestone H2b: `read`, `write`, `edit`, `multi_edit`, `glob`, `grep` and `ls` as an ai-agent-protocol tool source over any cl-stack-pathlib filesystem, confined to a root, with compare-and-swap writes (`expected_hash`), unified-diff edit previews, gitignore-aware listings and `path:` permission resources. 0.2.0 adds the H2c shell tools; until that slice is implemented, every `shell-tools` function signals "not implemented".
+Version **0.3.1**: H8c `unit-tools` (0.3.0); 0.3.1 centres a `unit_read` ref window whose `limit` is too small for 10 lines before the ref, and names the unit in a truncated `job_output` under a supervisor. 0.1.1 is milestone H2b: `read`, `write`, `edit`, `multi_edit`, `glob`, `grep` and `ls` as an ai-agent-protocol tool source over any cl-stack-pathlib filesystem, confined to a root, with compare-and-swap writes (`expected_hash`), unified-diff edit previews, gitignore-aware listings and `path:` permission resources. 0.2.0 adds the H2c shell tools; until that slice is implemented, every `shell-tools` function signals "not implemented".
 
 ```lisp
 (asdf:load-system "agent-tools")
