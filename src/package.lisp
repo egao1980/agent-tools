@@ -7,7 +7,9 @@
                     (#:diff #:diff-protocol)
                     (#:json #:json-protocol)
                     (#:pty #:pty-protocol)
-                    (#:proc #:process-protocol))
+                    (#:proc #:process-protocol)
+                    (#:sup #:supervisor-protocol)
+                    (#:ss #:supervisor-protocol/search))
   (:export
    ;; tool source
    #:file-tools
@@ -57,6 +59,8 @@
    #:call-shell-tool
    #:close-shell-tools
    #:shell-tools-closed-p
+   #:shell-tools-supervisor
+   #:shell-tools-scope
    ;; background jobs
    #:shell-job
    #:shell-job-id
@@ -64,6 +68,7 @@
    #:shell-job-status
    #:shell-job-exit-code
    #:shell-job-signal
+   #:shell-job-unit
    #:shell-tools-jobs
    #:find-shell-job
    ;; scanner and output (pure)
@@ -80,6 +85,34 @@
    #:job-not-found-id
    #:job-not-running
    #:job-not-running-id
-   #:job-not-running-status))
+   #:job-not-running-status
+   ;; unit tools (H8c)
+   #:unit-tools
+   #:unit-tools-p
+   #:make-unit-tools
+   #:unit-tools-supervisor
+   #:unit-tools-index
+   #:unit-tools-scope
+   #:unit-tools-previous
+   #:unit-tools-needs-approval
+   #:unit-tools-max-output
+   #:unit-tools-max-results
+   #:unit-tools-default-k
+   #:unit-tools-max-k
+   #:unit-tools-context
+   #:unit-tools-max-context
+   #:unit-tools-max-read-lines
+   #:unit-tools-max-wait
+   #:unit-tools-names
+   #:unit-tools-closed-p
+   #:+unit-tool-names+
+   #:+unit-search-kinds+
+   #:+unit-control-actions+
+   #:+max-excerpt-line+
+   #:call-unit-tool
+   #:close-unit-tools
+   #:parse-time-argument
+   #:unit-not-found
+   #:unit-not-found-unit))
 
 (in-package #:agent-tools)

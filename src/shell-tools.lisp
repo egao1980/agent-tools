@@ -70,7 +70,10 @@ is sh, bash, dash, zsh, ksh, mksh or ash → :POSIX; cmd → :CMD; anything else
               :documentation "Exit code once :EXITED normally, else NIL.")
    (signal :initarg :signal :initform nil :reader shell-job-signal
            :documentation "Terminating signal (a keyword such as :TERM, or a
-number) when the job :EXITED by a signal on the pty executor, else NIL."))
+number) when the job :EXITED by a signal on the pty executor, else NIL.")
+   (unit :initarg :unit :initform nil :reader shell-job-unit
+         :documentation "H8c: the SUPERVISOR-PROTOCOL:UNIT running the job when the
+source has a supervisor (the job id is then the unit id, \"shell-job-<n>\"), else NIL."))
   (:documentation "A background command started by bash run_in_background
 (or the RUN-IN-BACKGROUND restart). The implementation may subclass it or add
 slots."))
@@ -116,6 +119,14 @@ older unread output is dropped.")
 in that order.")
    (closed-p :initform nil :reader shell-tools-closed-p
              :documentation "True after CLOSE-SHELL-TOOLS.")
+   (supervisor :initarg :supervisor :initform nil :reader shell-tools-supervisor
+               :documentation "H8c: a SUPERVISOR-PROTOCOL:SUPERVISOR, or NIL. With one,
+every bash command runs as a :SHELL-JOB unit owned by SCOPE, and the job tools
+read the unit logs (see the agent-tools-units brief).")
+   (scope :initarg :scope :initform nil :reader shell-tools-scope
+          :documentation "H8c: the :TOOL-SOURCE scope named \"shell\" this source
+made under MAKE-SHELL-TOOLS :SCOPE (default the supervisor's root); NIL without
+a supervisor. CLOSE-SHELL-TOOLS closes it.")
    ;; Implementation slots.
    (files :initarg :files :reader %shell-files
           :documentation "A FILE-TOOLS over the same root with no tools, so
@@ -160,7 +171,8 @@ filesystem by identity)."
 (defun make-shell-tools (&key root (executor :auto) shell dialect env
                            (needs-approval t) (default-timeout 120000)
                            (max-timeout 600000) (max-output 30000) (max-jobs 8)
-                           (max-job-buffer 1000000) (tools +shell-tool-names+))
+                           (max-job-buffer 1000000) (tools +shell-tool-names+)
+                           supervisor scope)
   "→ a SHELL-TOOLS source rooted at ROOT (a string, pathname or local
 CL-STACK-PATHLIB:PATH naming an existing directory).
 EXECUTOR: :AUTO (:PTY on Unix, :PROCESS on Windows), :PTY or :PROCESS; :PTY on
@@ -169,8 +181,22 @@ Windows signals an ERROR. SHELL defaults to (DEFAULT-SHELL); DIALECT to
 A missing ROOT signals CL-STACK-PATHLIB:PATH-NOT-FOUND; a ROOT that is not a
 directory signals CL-STACK-PATHLIB:PATH-ERROR; a PATH on another filesystem
 than the local one, an unknown tool name, an unknown executor or dialect, or
-DEFAULT-TIMEOUT above MAX-TIMEOUT signal an ERROR."
+DEFAULT-TIMEOUT above MAX-TIMEOUT signal an ERROR.
+H8c: SUPERVISOR (a SUPERVISOR-PROTOCOL:SUPERVISOR) runs every command as a unit
+(see SHELL-TOOLS-SUPERVISOR); :EXECUTOR :AUTO then means :PROCESS, and :PTY is an
+ERROR until the supervisor has a pty executor (H8a-1). SCOPE (a scope of
+SUPERVISOR, default its root) is the parent of the source's own \"shell\"
+scope. SCOPE without SUPERVISOR, or a scope of another supervisor → ERROR."
   (check-type executor (member :auto :pty :process))
+  (when (and supervisor (not (typep supervisor 'sup:supervisor)))
+    (error 'type-error :datum supervisor :expected-type 'sup:supervisor))
+  (when scope
+    (unless supervisor
+      (error "make-shell-tools: :scope needs :supervisor"))
+    (unless (and (typep scope 'sup:scope) (eq supervisor (sup:scope-supervisor scope)))
+      (error "make-shell-tools: :scope ~s is not a scope of the supervisor" scope)))
+  (when (and supervisor (eq executor :pty))
+    (error "make-shell-tools: :executor :pty with a supervisor arrives with the supervisor's pty executor (H8a-1); use :process"))
   (check-type dialect (or null (member :posix :cmd :opaque)))
   (check-type default-timeout (integer 1))
   (check-type max-timeout (integer 1))
@@ -189,9 +215,9 @@ DEFAULT-TIMEOUT above MAX-TIMEOUT signal an ERROR."
       (when unknown
         (error "make-shell-tools: unknown tool name~p ~{~s~^, ~}; known: ~{~a~^, ~}"
                (length unknown) unknown +shell-tool-names+)))
-    (let ((executor (if (eq executor :auto)
-                        #+(or windows win32) :process #-(or windows win32) :pty
-                        executor)))
+    (let ((executor (cond ((not (eq executor :auto)) executor)
+                          (supervisor :process)
+                          (t #+(or windows win32) :process #-(or windows win32) :pty))))
       #+(or windows win32)
       (when (eq executor :pty)
         (error "make-shell-tools: :executor :pty is not supported on Windows in 0.2.0; use :process"))
@@ -220,7 +246,11 @@ DEFAULT-TIMEOUT above MAX-TIMEOUT signal an ERROR."
                        :max-jobs max-jobs
                        :max-job-buffer max-job-buffer
                        :names (remove-if-not (lambda (n) (member n tools :test #'equal))
-                                             +shell-tool-names+))))))
+                                             +shell-tool-names+)
+                       :supervisor supervisor
+                       :scope (and supervisor
+                                   (sup:make-scope supervisor :tool-source "shell"
+                                                   :parent (or scope (sup:supervisor-root-scope supervisor)))))))))
 
 ;;; --- facade ----------------------------------------------------------------
 
@@ -251,12 +281,17 @@ signals AI-AGENT-PROTOCOL:TOOL-UNAVAILABLE."
                             name (shell-tools-names tools))))
   (when (shell-tools-closed-p tools)
     (%closed-error name))
-  (funcall (cdr (assoc name +shell-tool-handlers+ :test #'string=))
-           tools (%decode-arguments arguments)))
+  (if (shell-tools-supervisor tools)
+      (%call-supervised-shell-tool tools name (%decode-arguments arguments))
+      (funcall (cdr (assoc name +shell-tool-handlers+ :test #'string=))
+               tools (%decode-arguments arguments))))
 
 (defun close-shell-tools (tools)
   "Kill every running job of TOOLS (status :KILLED) and refuse later calls.
-Idempotent. → NIL."
+Idempotent. → NIL. H8c: with a supervisor, close the source's scope instead
+(its units stop; their logs stay)."
+  (when (shell-tools-supervisor tools)
+    (return-from close-shell-tools (%close-supervised-shell-tools tools)))
   (let ((live (bt2:with-lock-held ((%shell-lock tools))
                 (unless (shell-tools-closed-p tools)
                   (setf (slot-value tools 'closed-p) t)

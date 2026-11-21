@@ -1,6 +1,6 @@
 (defsystem "agent-tools"
-  :version "0.2.0"
-  :description "Coding agent tools as ai-agent-protocol tool sources: files (read, write, edit, multi_edit, glob, grep, ls) over any cl-stack-pathlib filesystem, and shell (bash, background jobs, command scanner for permissions)"
+  :version "0.3.0"
+  :description "Coding agent tools as ai-agent-protocol tool sources: files (read, write, edit, multi_edit, glob, grep, ls) over any cl-stack-pathlib filesystem, shell (bash, background jobs, command scanner for permissions), and supervisor units (list, search, read, tail, control their logs)"
   :author "egao1980"
   :license "MIT"
   :depends-on ((:version "ai-agent-protocol" "0.10.0")
@@ -11,7 +11,9 @@
                (:version "process-protocol" "0.4.0")
                (:version "process-backend-uiop" "0.3.0")
                (:version "pty-protocol" "0.1.0")
-               (:version "pty-backend-native" "0.2.1"))
+               (:version "pty-backend-native" "0.2.1")
+               (:version "supervisor-protocol" "0.3.0")
+               (:version "supervisor-protocol/search" "0.3.0"))
   :serial t
   :pathname "src"
   :components ((:file "package")
@@ -22,7 +24,10 @@
                (:file "shell-scan")
                (:file "shell-tools")
                (:file "shell-run")
-               (:file "shell-source"))
+               (:file "shell-source")
+               (:file "unit-tools")       ; H8c: the source, constants, constructor
+               (:file "unit-source")      ; H8c: descriptors, schemas, protocol methods
+               (:file "unit-run"))        ; H8c: the five tools, shell jobs under a supervisor
   :in-order-to ((test-op (test-op "agent-tools/tests"))))
 
 (defsystem "agent-tools/tests"
@@ -35,6 +40,8 @@
                "event-backend-libuv"
                "process-protocol"
                "pty-protocol"
+               "supervisor-protocol"
+               "supervisor-protocol/search"
                "rove")
   :pathname "tests"
   :serial t
@@ -63,7 +70,17 @@
                (:file "shell-posix-test" :if-feature (:not (:or :windows :win32)))
                (:file "shell-pty-test" :if-feature (:not (:or :windows :win32)))
                (:file "shell-permissions-test")
-               (:file "shell-agent-run-test"))
+               (:file "shell-agent-run-test")
+               (:file "unit-support")
+               (:file "unit-construct-test")
+               (:file "unit-time-test")
+               (:file "unit-list-test")
+               (:file "unit-search-test")
+               (:file "unit-read-test")
+               (:file "unit-tail-test")
+               (:file "unit-control-test")
+               (:file "unit-shell-test")
+               (:file "unit-agent-run-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))

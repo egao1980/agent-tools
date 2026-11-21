@@ -158,7 +158,7 @@ which is not an ERROR) FORM signals, or NIL when it returns."
   ((armed :initform nil :accessor racing-armed)))
 
 (defmethod p:fs-write-atomic :around ((fs racing-filesystem) pathname bytes
-                                      &key expected-hash)
+                                      &key expected-hash &allow-other-keys)
   (declare (ignore bytes expected-hash))
   (let ((theirs (shiftf (racing-armed fs) nil)))
     (when theirs

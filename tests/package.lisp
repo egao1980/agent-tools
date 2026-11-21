@@ -4,6 +4,8 @@
                     (#:llm #:llm-protocol)
                     (#:p #:cl-stack-pathlib)
                     (#:d #:diff-protocol)
-                    (#:json #:json-protocol)))
+                    (#:json #:json-protocol)
+                    (#:sup #:supervisor-protocol)
+                    (#:ss #:supervisor-protocol/search)))
 
 (in-package #:agent-tools/tests)
