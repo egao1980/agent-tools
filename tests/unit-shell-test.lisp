@@ -47,7 +47,11 @@ temp state directory) and KEYS; UNITS: a UNIT-TOOLS over SUP."
       (ok (equal '(:tool "bash") (sup:unit-labels u)))
       (ok (eq (shell-tools-scope tools) (sup:unit-owner u)))
       (ok (eq :exited (sup:unit-state u)))
-      (ok (equal '("hi") (mapcar #'sup:log-record-text (sup:log-read u))) "its output is in its log"))
+      ;; cmd.exe's echo ends its line in CR LF and the log keeps the exact
+      ;; output octets (supervisor.md, Binary / non-UTF-8), so the record is "hi" CR.
+      (ok (equal (list (pick "hi" (format nil "hi~c" #\Return)))
+                 (mapcar #'sup:log-record-text (sup:log-read u)))
+          "its output is in its log"))
     (ok (equal (exit-text "" 3) (bash tools (pick "exit 3" "exit /b 3"))))
     (ok (null (shell-tools-jobs tools)) "foreground commands are not jobs")))
 
