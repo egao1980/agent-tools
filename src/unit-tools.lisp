@@ -5,9 +5,6 @@
 ;;; dumps, and controls units under permission rules. Brief:
 ;;; cl-stack/docs/capabilities/agent-tools-units.md.
 
-(defun %h8c-pending (what)
-  (error "agent-tools H8c: ~a is not implemented yet" what))
-
 (defparameter +unit-tool-names+
   '("unit_list" "unit_search" "unit_read" "unit_tail" "unit_control")
   "Every unit tool name, in listing order.")
