@@ -64,7 +64,7 @@ with its JS stack on stderr."
       (flet ((refs-units (&rest kv)
                (let ((r (apply #'ucall tools "unit_search" kv)))
                  (loop for l in (result-lines r)
-                       when (and (> (length l) 4) (char= #\[ (char l 0)) (digit-char-p (char l 1)))
+                       when (and (> (length l) 4) (char= #\[ (char l 0)) (digit-char-p (char l 1)) (find #\: l))
                          collect (subseq l (1+ (position #\Space l)) (position #\: l))))))
         (ok (equal (list (sup:unit-id build))
                    (remove-duplicates (refs-units "query" "error" "units" (vector (sup:unit-id build)) "k" 50)

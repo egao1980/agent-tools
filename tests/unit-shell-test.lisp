@@ -137,7 +137,7 @@ temp state directory) and KEYS; UNITS: a UNIT-TOOLS over SUP."
       (ok (null (close-shell-tools tools)))
       (ok (eq :killed (sup:unit-state u)))
       (ok (sup:scope-closed-p (shell-tools-scope tools)))
-      (ok (sup:log-read u) "the log stays")
+      (ok (sup:log-read u :types t) "the log stays")
       (ok (null (close-shell-tools tools)) "idempotent")
       (ok (typep (failure (bash tools "echo x")) 'a:tool-unavailable)))))
 
