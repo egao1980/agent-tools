@@ -64,3 +64,12 @@ SHELL-TOOLS source."))
    (status :initarg :status :reader job-not-running-status :initform nil
            :documentation ":EXITED or :KILLED."))
   (:documentation "job_input on a job that has already finished."))
+
+;;; --- unit tools (H8c) --------------------------------------------------------
+
+(define-condition unit-not-found (agent:tool-input-error)
+  ((unit :initarg :unit :reader unit-not-found-unit :initform nil
+         :documentation "The unit / ref argument as given."))
+  (:documentation "A unit tool named a unit (or a ref's unit) that this
+UNIT-TOOLS source cannot see: unknown, evicted with no log left, or owned
+outside its scope. The message names the argument and unit_list."))

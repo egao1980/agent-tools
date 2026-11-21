@@ -6,9 +6,11 @@ The coding agent's tools as [`ai-agent-protocol`](https://github.com/egao1980/ai
 
 - `shell-tools` (**H2c, contract, 0.2.0**): `bash` with timeouts and output caps, background jobs (`job_output`, `job_input`, `job_kill`, `job_list`), and a shell command scanner that feeds permission resources. Commands run on `pty-protocol` on Unix and `process-protocol` on Windows.
 
-Briefs: [`agent-tools.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools.md) (H2b), [`agent-tools-shell.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools-shell.md) (H2c). Plan: Track H, milestone H2.
+- `unit-tools` (**H8c, contract, 0.3.0**): `unit_list`, `unit_search`, `unit_read`, `unit_tail` and `unit_control` over a [`supervisor-protocol`](https://github.com/egao1980/supervisor-protocol) supervisor: ranked log excerpts with `unit:segment:line` refs, reads and follows across rotations, permission-gated stop / restart / input. With a supervisor, `shell-tools` runs every command as a unit and the job tools read the unit logs.
 
-Version **0.2.0** (in progress). 0.1.1 is milestone H2b: `read`, `write`, `edit`, `multi_edit`, `glob`, `grep` and `ls` as an ai-agent-protocol tool source over any cl-stack-pathlib filesystem, confined to a root, with compare-and-swap writes (`expected_hash`), unified-diff edit previews, gitignore-aware listings and `path:` permission resources. 0.2.0 adds the H2c shell tools; until that slice is implemented, every `shell-tools` function signals "not implemented".
+Briefs: [`agent-tools.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools.md) (H2b), [`agent-tools-shell.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools-shell.md) (H2c), [`agent-tools-units.md`](https://github.com/egao1980/cl-stack/blob/main/docs/capabilities/agent-tools-units.md) (H8c). Plan: Track H, milestones H2 and H8.
+
+Version **0.3.0** (in progress: H8c `unit-tools`; its functions signal "not implemented" until that slice lands). 0.1.1 is milestone H2b: `read`, `write`, `edit`, `multi_edit`, `glob`, `grep` and `ls` as an ai-agent-protocol tool source over any cl-stack-pathlib filesystem, confined to a root, with compare-and-swap writes (`expected_hash`), unified-diff edit previews, gitignore-aware listings and `path:` permission resources. 0.2.0 adds the H2c shell tools; until that slice is implemented, every `shell-tools` function signals "not implemented".
 
 ```lisp
 (asdf:load-system "agent-tools")
