@@ -825,8 +825,10 @@ line naming unit ID, everything within MAX characters."
                (when (and (eq :killed (sup:unit-state unit)) (shell-tools-closed-p tools))
                  ;; CLOSE-SHELL-TOOLS closed the scope under this run.
                  (%closed-error "bash"))
-               (return (%with-status (%supervised-output tools unit :drain t)
-                                     (%unit-exit-line unit))))
+               (return (%with-note tools (%supervised-output tools unit :drain t)
+                                   (%unit-exit-line unit)
+                                   (and (member (sup:unit-state unit) '(:exited :failed))
+                                        (sup:unit-exit-code unit)))))
              ;; I-restart: signalled here, in the caller's thread, with the
              ;; command still running; the restarts recover in this frame.
              (restart-case
@@ -911,10 +913,11 @@ it never comes before output still unread."
     (bt2:with-lock-held ((%unit-job-lock job))
       (let ((finished (sup:unit-finished-p u)))
         (multiple-value-bind (text dropped) (%unit-job-take tools job finished)
-          (%with-status (%output-text tools text dropped :unit-id (shell-job-id job))
-                        (if finished
-                            (%status-line job)
-                            (format nil "[job ~a running]" (shell-job-id job)))))))))
+          (%with-note tools (%output-text tools text dropped :unit-id (shell-job-id job))
+                      (if finished
+                          (%status-line job)
+                          (format nil "[job ~a running]" (shell-job-id job)))
+                      (and finished (shell-job-exit-code job))))))))
 
 (defun %sup-tool-job-output (tools args)
   (let* ((id (%arg args "job_id" :string :required t))

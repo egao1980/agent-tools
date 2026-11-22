@@ -98,9 +98,10 @@
                    (format nil "[job ~a exited with code ~a]" id (shell-job-exit-code job)))))))
 
 (defun %job-take (job &key peek)
-  "→ (values unread-text dropped status-line), consuming the text unless
+  "→ (values unread-text dropped status-line finished-p), consuming the text unless
 PEEK. While the job runs, an unfinished escape sequence or a final CR stays
-for the next take."
+for the next take. FINISHED-P: the job had finished when the text was taken
+(read with the status line, under the job lock)."
   (bt2:with-lock-held ((%job-lock job))
     (let* ((text (%job-text job))
            (start (%job-start job))
@@ -112,7 +113,7 @@ for the next take."
       (unless peek
         (setf (%job-start job) end
               (%job-dropped job) 0))
-      (values chunk dropped (%status-line job)))))
+      (values chunk dropped (%status-line job) (%job-finished job)))))
 
 (declaim (ftype function %truncate-in-unit)) ; src/unit-run.lisp
 
@@ -134,6 +135,16 @@ foreground bash does (%TRUNCATE-IN-UNIT, agent-tools#7)."
   (if (zerop (length output))
       status
       (format nil "~a~%~a" output status)))
+
+(declaim (ftype function confinement-denial-note)) ; src/shell-confine.lisp
+
+(defun %with-note (tools output status exit-code)
+  "%WITH-STATUS, plus (R4d-4a) the confinement's denial note on its own line
+right before STATUS when TOOLS is confined and the note applies to OUTPUT and
+EXIT-CODE. Unconfined TOOLS: exactly %WITH-STATUS."
+  (let* ((confinement (shell-tools-confinement tools))
+         (note (and confinement (confinement-denial-note confinement output exit-code))))
+    (%with-status (if note (%with-status output note) output) status)))
 
 (defun %signal-name (signal)
   (if (symbolp signal) (symbol-name signal) (princ-to-string signal)))
@@ -215,7 +226,21 @@ terminal: HUP, then KILL, then the master is closed."
 
 (defun %finish (job)
   "Mark JOB finished (idempotent), free its handle and take it off the
-tools' live set. Called by the pump thread."
+tools' live set. Called by the pump thread. R4d-4a: a confined job's handle is
+closed (its tree killed) and its launch released BEFORE the job shows as
+finished, so a caller that saw the end finds the launch released."
+  (let ((launch (shell-job-launch job)))
+    (if (null launch)
+        (%finish-1 job)
+        (unwind-protect
+             (unless (bt2:with-lock-held ((%job-lock job)) (%job-finished job))
+               (unwind-protect (%close-handle job)
+                 (setf (%job-handle job) nil)   ; %FINISH-1's close is then a no-op
+                 (sc:release-confined-launch launch)))
+          (%finish-1 job)))))
+
+(defun %finish-1 (job)
+  "%FINISH's body: mark JOB finished, free its handle, take it off the live set."
   (let ((first nil))
     (bt2:with-lock-held ((%job-lock job))
       (unless (%job-finished job)
@@ -527,7 +552,8 @@ the POSIX form /C:/dir/ is not a usable directory, and /dir/ elsewhere."
                ;; Only CLOSE-SHELL-TOOLS kills a foreground run.
                (%closed-error "bash"))
              (return (multiple-value-bind (chunk dropped) (%job-take job)
-                       (%with-status (%output-text tools chunk dropped) (%exit-line job)))))
+                       (%with-note tools (%output-text tools chunk dropped) (%exit-line job)
+                                   (shell-job-exit-code job)))))
            ;; I-restart: signalled here, in the caller's thread, with the
            ;; command still running; the restarts recover in this frame.
            (restart-case
@@ -582,8 +608,10 @@ the POSIX form /C:/dir/ is not a usable directory, and /dir/ elsewhere."
   "What job_output returns for JOB after waiting up to WAIT-MS for it."
   (when (plusp wait-ms)
     (%wait-finished job (/ wait-ms 1000d0)))
-  (multiple-value-bind (chunk dropped status) (%job-take job)
-    (%with-status (%output-text tools chunk dropped) status)))
+  (multiple-value-bind (chunk dropped status finished) (%job-take job)
+    ;; R4d-4a: the denial note only with a final status (FINISHED from the take).
+    (%with-note tools (%output-text tools chunk dropped) status
+                (and finished (shell-job-exit-code job)))))
 
 (defun %tool-job-output (tools args)
   (let* ((id (%arg args "job_id" :string :required t))
