@@ -9,7 +9,7 @@
                "json-protocol"
                "json-backend-jzon"
                (:version "process-protocol" "0.4.0")
-               (:version "process-backend-uiop" "0.3.0")
+               (:version "process-backend-uiop" "0.3.4")
                (:version "pty-protocol" "0.1.0")
                (:version "pty-backend-native" "0.2.1")
                (:version "supervisor-protocol" "0.4.0")
