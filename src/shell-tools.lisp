@@ -73,7 +73,11 @@ is sh, bash, dash, zsh, ksh, mksh or ash → :POSIX; cmd → :CMD; anything else
 number) when the job :EXITED by a signal on the pty executor, else NIL.")
    (unit :initarg :unit :initform nil :reader shell-job-unit
          :documentation "H8c: the SUPERVISOR-PROTOCOL:UNIT running the job when the
-source has a supervisor (the job id is then the unit id, \"shell-job-<n>\"), else NIL."))
+source has a supervisor (the job id is then the unit id, \"shell-job-<n>\"), else NIL.")
+   (launch :initarg :launch :initform nil :reader shell-job-launch
+           :documentation "R4d-4a: the STACK-COMPUTE:CONFINED-LAUNCH the job runs (kept, released,
+after it ended) when the source is confined, else NIL. Under a supervisor: the unit's
+SUPERVISOR-PROTOCOL:UNIT-CONFINED-LAUNCH."))
   (:documentation "A background command started by bash run_in_background
 (or the RUN-IN-BACKGROUND restart). The implementation may subclass it or add
 slots."))
@@ -127,6 +131,16 @@ read the unit logs (see the agent-tools-units brief).")
           :documentation "H8c: the :TOOL-SOURCE scope named \"shell\" this source
 made under MAKE-SHELL-TOOLS :SCOPE (default the supervisor's root); NIL without
 a supervisor. CLOSE-SHELL-TOOLS closes it.")
+   (confinement :initarg :confinement :initform nil :reader shell-tools-confinement
+                :documentation "R4d-4a: a STACK-COMPUTE:CONFINEMENT every command runs under, or
+NIL (unconfined, the 0.3 behaviour).")
+   (compute-backend :initarg :compute-backend :initform nil :reader shell-tools-compute-backend
+                    :documentation "R4d-4a: the STACK-COMPUTE:CONFINING-BACKEND that confines the
+commands (CONFINE-COMMAND), or NIL exactly when CONFINEMENT is NIL.")
+   (compute-executor :initarg :compute-executor :initform nil :reader %shell-compute-executor
+                     :documentation "With a supervisor and a confinement: the
+SUPERVISOR-PROTOCOL:COMPUTE-EXECUTOR over COMPUTE-BACKEND that START-UNIT gets as
+:EXECUTOR, so the supervisor needs no :COMPUTE-EXECUTOR of its own.")
    ;; Implementation slots.
    (files :initarg :files :reader %shell-files
           :documentation "A FILE-TOOLS over the same root with no tools, so
@@ -148,6 +162,14 @@ tree. The implementation may add slots (jobs, a lock, the id counter)."))
 
 (defun shell-tools-p (x)
   (typep x 'shell-tools))
+
+(defun shell-tools-confined-p (tools)
+  "R4d-4a: true when TOOLS runs every command under a confinement."
+  (and (shell-tools-confinement tools) t))
+
+(defun shell-job-confined-p (job)
+  "R4d-4a: true when JOB ran (or runs) under a confined launch."
+  (and (shell-job-launch job) t))
 
 
 ;;; --- constructor -----------------------------------------------------------
@@ -172,7 +194,7 @@ filesystem by identity)."
                            (needs-approval t) (default-timeout 120000)
                            (max-timeout 600000) (max-output 30000) (max-jobs 8)
                            (max-job-buffer 1000000) (tools +shell-tool-names+)
-                           supervisor scope)
+                           supervisor scope confinement compute-backend)
   "→ a SHELL-TOOLS source rooted at ROOT (a string, pathname or local
 CL-STACK-PATHLIB:PATH naming an existing directory).
 EXECUTOR: :AUTO (:PTY on Unix, :PROCESS on Windows), :PTY or :PROCESS; :PTY on
@@ -186,7 +208,17 @@ H8c: SUPERVISOR (a SUPERVISOR-PROTOCOL:SUPERVISOR) runs every command as a unit
 (see SHELL-TOOLS-SUPERVISOR); :EXECUTOR :AUTO then means :PROCESS, and :PTY is an
 ERROR until the supervisor has a pty executor (H8a-1). SCOPE (a scope of
 SUPERVISOR, default its root) is the parent of the source's own \"shell\"
-scope. SCOPE without SUPERVISOR, or a scope of another supervisor → ERROR."
+scope. SCOPE without SUPERVISOR, or a scope of another supervisor → ERROR.
+R4d-4a: CONFINEMENT (a STACK-COMPUTE:CONFINEMENT) and COMPUTE-BACKEND (a
+STACK-COMPUTE:CONFINING-BACKEND) confine every command: each command line goes
+through STACK-COMPUTE:CONFINE-COMMAND with :DIRECTORY the resolved workdir and :ENV
+the shell overrides (+SHELL-ENVIRONMENT+ then ENV, added after the scrub); the pty or
+process executor runs the launch's argv with exactly its environment; the launch is
+released when the job ends. Under a SUPERVISOR the command is a unit started with
+:CONFINEMENT and a compute executor over COMPUTE-BACKEND. Both or neither: one
+without the other → ERROR; a value of the wrong type → TYPE-ERROR. Construction
+does not check the confinement against the backend: a refusal (unsupported,
+unavailable) is per command, SHELL-CONFINEMENT-REFUSED, and nothing runs."
   (check-type executor (member :auto :pty :process))
   (when (and supervisor (not (typep supervisor 'sup:supervisor)))
     (error 'type-error :datum supervisor :expected-type 'sup:supervisor))
@@ -197,6 +229,14 @@ scope. SCOPE without SUPERVISOR, or a scope of another supervisor → ERROR."
       (error "make-shell-tools: :scope ~s is not a scope of the supervisor" scope)))
   (when (and supervisor (eq executor :pty))
     (error "make-shell-tools: :executor :pty with a supervisor arrives with the supervisor's pty executor (H8a-1); use :process"))
+  (when (and confinement (not (typep confinement 'sc:confinement)))
+    (error 'type-error :datum confinement :expected-type 'sc:confinement))
+  (when (and compute-backend (not (typep compute-backend 'sc:confining-backend)))
+    (error 'type-error :datum compute-backend :expected-type 'sc:confining-backend))
+  (when (and confinement (not compute-backend))
+    (error "make-shell-tools: :confinement needs :compute-backend (a confining backend)"))
+  (when (and compute-backend (not confinement))
+    (error "make-shell-tools: :compute-backend needs :confinement"))
   (check-type dialect (or null (member :posix :cmd :opaque)))
   (check-type default-timeout (integer 1))
   (check-type max-timeout (integer 1))
@@ -248,6 +288,11 @@ scope. SCOPE without SUPERVISOR, or a scope of another supervisor → ERROR."
                        :names (remove-if-not (lambda (n) (member n tools :test #'equal))
                                              +shell-tool-names+)
                        :supervisor supervisor
+                       :confinement confinement
+                       :compute-backend compute-backend
+                       :compute-executor (and supervisor confinement
+                                              (sup:make-compute-executor
+                                               :compute-backend compute-backend))
                        :scope (and supervisor
                                    (sup:make-scope supervisor :tool-source "shell"
                                                    :parent (or scope (sup:supervisor-root-scope supervisor)))))))))

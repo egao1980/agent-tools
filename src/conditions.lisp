@@ -73,3 +73,28 @@ SHELL-TOOLS source."))
   (:documentation "A unit tool named a unit (or a ref's unit) that this
 UNIT-TOOLS source cannot see: unknown, evicted with no log left, or owned
 outside its scope. The message names the argument and unit_list."))
+
+;;; --- confinement (R4d-4a) ------------------------------------------------------
+
+(define-condition shell-confinement-refused (agent:tool-unavailable)
+  ((command :initarg :command :reader shell-confinement-refused-command :initform nil
+            :documentation "The command line as the model gave it.")
+   (cause :initarg :cause :reader shell-confinement-refused-cause :initform nil
+          :documentation "The compute-protocol condition that refused the launch:
+STACK-COMPUTE:CONFINEMENT-UNSUPPORTED, STACK-COMPUTE:CONFINEMENT-UNAVAILABLE or
+STACK-COMPUTE:INVALID-CONFINEMENT (any STACK-COMPUTE:COMPUTE-ERROR)."))
+  (:documentation "A confined SHELL-TOOLS source could not confine a bash command, so
+the command was NOT run (fail closed: never unconfined). Signalled per command, from
+inside a HANDLER-BIND on the compute condition, so that condition's restarts
+\(CHECK-CONFINEMENT's USE-VALUE) are still available to a handler:
+  (handler-bind ((shell-confinement-refused
+                   (lambda (c) (use-value other (shell-confinement-refused-cause c)))))
+    …)
+Nothing was spawned and no job id was used. MESSAGE: \"the confinement was refused;
+the command was not run (<the cause, printed>)\". In an agent run it becomes a tool
+result (TOOL-FAILURE-TEXT below); a caller such as cl-stack-code can handle it
+instead and fall back to asking."))
+
+(defmethod agent:tool-failure-text ((condition shell-confinement-refused) name)
+  (format nil "Tool ~a was not run: ~a~%Nothing ran: confined commands never run unconfined. Do not repeat the same call; continue another way, or ask the user."
+          name (princ-to-string condition)))

@@ -9,11 +9,21 @@
 (defparameter +job-id-description+
   "The job id from the bash run_in_background result, e.g. \"job-1\".")
 
+(declaim (ftype function confinement-description)) ; src/shell-confine.lisp
+
+(defun %bash-description (source)
+  "The bash description without the confinement paragraph."
+  (format nil "Run a command line with ~{~a~^ ~} in a fresh shell (no state carries over between calls; pass workdir instead of cd). Output: stdout and stderr merged, cleaned, head + tail truncated, then \"[exit code N]\"; a non-zero exit is a normal result. Foreground commands get end of file on stdin and time out after timeout_ms. For servers, watchers and other long commands set run_in_background: true, then read them with job_output and stop them with job_kill."
+          (shell-tools-shell source)))
+
 (defun %shell-tool-description (source name)
   (cond
+    ((and (string= name "bash") (shell-tools-confinement source))
+     ;; R4d-4a: the unconfined text, then one paragraph on what the sandbox allows.
+     (format nil "~a~%~a" (%bash-description source)
+             (confinement-description (shell-tools-confinement source))))
     ((string= name "bash")
-     (format nil "Run a command line with ~{~a~^ ~} in a fresh shell (no state carries over between calls; pass workdir instead of cd). Output: stdout and stderr merged, cleaned, head + tail truncated, then \"[exit code N]\"; a non-zero exit is a normal result. Foreground commands get end of file on stdin and time out after timeout_ms. For servers, watchers and other long commands set run_in_background: true, then read them with job_output and stop them with job_kill."
-             (shell-tools-shell source)))
+     (%bash-description source))
     ((string= name "job_output")
      "Read the output a background job printed since the last read, then its status line ([job <id> running] or how it ended). wait_ms waits for the job to finish, at most that long.")
     ((string= name "job_input")

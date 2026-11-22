@@ -698,9 +698,14 @@ id, UNIT the unit."))
   "Stop UNIT (its process tree); a no-op on a finished unit."
   (%stop-unit unit :grace 1))
 
+(declaim (ftype function %start-confined-shell-unit)) ; src/shell-confine.lisp
+
 (defun %start-shell-unit (tools command directory)
   "→ a running :SHELL-JOB unit for COMMAND in DIRECTORY. The shell missing or
-failing to launch, or the source closed → TOOL-UNAVAILABLE."
+failing to launch, or the source closed → TOOL-UNAVAILABLE. R4d-4a: a confined
+TOOLS goes through %START-CONFINED-SHELL-UNIT."
+  (when (shell-tools-confinement tools)
+    (return-from %start-shell-unit (%start-confined-shell-unit tools command directory)))
   (let ((program (first (shell-tools-shell tools))))
     (when (and (find-if (lambda (c) (find c "/\\")) program)
                (null (uiop:probe-file* (uiop:parse-native-namestring program))))

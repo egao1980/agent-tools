@@ -380,10 +380,15 @@ itself has exited, while a grandchild still runs; otherwise only H."
       (pty:pty-spawn-error (c) (%cannot-start tools c))
       (proc:process-error (c) (%cannot-start tools c)))))
 
+(declaim (ftype function %spawn-confined-job %confined-job-list)) ; src/shell-confine.lisp
+
 (defun %spawn-job (tools command directory &key foreground)
   "Start COMMAND in DIRECTORY (a native directory string). → a live %JOB
 with its pump running. The shell not starting, or TOOLS closed, signals
-TOOL-UNAVAILABLE."
+TOOL-UNAVAILABLE. R4d-4a: a confined TOOLS goes through %SPAWN-CONFINED-JOB."
+  (when (shell-tools-confinement tools)
+    (return-from %spawn-job
+      (%spawn-confined-job tools command directory :foreground foreground)))
   (let* ((program (first (shell-tools-shell tools)))
          (executor (shell-tools-executor tools))
          (posix-eof (and foreground (eq executor :pty)
@@ -620,6 +625,8 @@ the POSIX form /C:/dir/ is not a usable directory, and /dir/ elsewhere."
 
 (defun %tool-job-list (tools args)
   (declare (ignore args))
+  (when (shell-tools-confinement tools)
+    (return-from %tool-job-list (%confined-job-list tools)))
   (let ((jobs (shell-tools-jobs tools)))
     (if (null jobs)
         "[no jobs]"
