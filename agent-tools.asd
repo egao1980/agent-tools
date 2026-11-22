@@ -1,6 +1,6 @@
 (defsystem "agent-tools"
-  :version "0.3.1"
-  :description "Coding agent tools as ai-agent-protocol tool sources: files (read, write, edit, multi_edit, glob, grep, ls) over any cl-stack-pathlib filesystem, shell (bash, background jobs, command scanner for permissions), and supervisor units (list, search, read, tail, control their logs)"
+  :version "0.4.0"
+  :description "Coding agent tools as ai-agent-protocol tool sources: files (read, write, edit, multi_edit, glob, grep, ls) over any cl-stack-pathlib filesystem, shell (bash, background jobs, command scanner for permissions), and supervisor units (list, search, read, tail, control their logs); shell commands optionally confined through a compute-protocol backend"
   :author "egao1980"
   :license "MIT"
   :depends-on ((:version "ai-agent-protocol" "0.10.0")
@@ -9,11 +9,12 @@
                "json-protocol"
                "json-backend-jzon"
                (:version "process-protocol" "0.4.0")
-               (:version "process-backend-uiop" "0.3.0")
+               (:version "process-backend-uiop" "0.3.4")
                (:version "pty-protocol" "0.1.0")
                (:version "pty-backend-native" "0.2.1")
-               (:version "supervisor-protocol" "0.3.1")
-               (:version "supervisor-protocol/search" "0.3.1"))
+               (:version "supervisor-protocol" "0.4.0")
+               (:version "supervisor-protocol/search" "0.4.0")
+               (:version "compute-protocol" "0.3.2"))
   :serial t
   :pathname "src"
   :components ((:file "package")
@@ -27,7 +28,8 @@
                (:file "shell-source")
                (:file "unit-tools")       ; H8c: the source, constants, constructor
                (:file "unit-source")      ; H8c: descriptors, schemas, protocol methods
-               (:file "unit-run"))        ; H8c: the five tools, shell jobs under a supervisor
+               (:file "unit-run")         ; H8c: the five tools, shell jobs under a supervisor
+               (:file "shell-confine"))   ; R4d-4a: confined bash / jobs (compute-protocol launches)
   :in-order-to ((test-op (test-op "agent-tools/tests"))))
 
 (defsystem "agent-tools/tests"
@@ -42,6 +44,9 @@
                "pty-protocol"
                "supervisor-protocol"
                "supervisor-protocol/search"
+               "compute-protocol"
+               (:feature :darwin "compute-backend-seatbelt")
+               (:feature :linux "compute-backend-landlock")
                "rove")
   :pathname "tests"
   :serial t
@@ -80,7 +85,15 @@
                (:file "unit-tail-test")
                (:file "unit-control-test")
                (:file "unit-shell-test")
-               (:file "unit-agent-run-test"))
+               (:file "unit-agent-run-test")
+               (:file "confine-support")          ; R4d-4a: recording backend, helpers
+               (:file "confine-construct-test")
+               (:file "confine-test")             ; per executor, model / recording backends
+               (:file "confine-unit-test")        ; under a supervisor (compute executor)
+               (:file "confine-agent-run-test")
+               (:file "confine-real-support" :if-feature (:and :sbcl (:or :darwin :linux)))
+               (:file "confine-seatbelt-test" :if-feature (:and :sbcl :darwin))
+               (:file "confine-landlock-test" :if-feature (:and :sbcl :linux)))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))

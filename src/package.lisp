@@ -9,7 +9,8 @@
                     (#:pty #:pty-protocol)
                     (#:proc #:process-protocol)
                     (#:sup #:supervisor-protocol)
-                    (#:ss #:supervisor-protocol/search))
+                    (#:ss #:supervisor-protocol/search)
+                    (#:sc #:compute-protocol))
   (:export
    ;; tool source
    #:file-tools
@@ -61,6 +62,17 @@
    #:shell-tools-closed-p
    #:shell-tools-supervisor
    #:shell-tools-scope
+   ;; confinement (R4d-4a)
+   #:shell-tools-confinement
+   #:shell-tools-compute-backend
+   #:shell-tools-confined-p
+   #:shell-job-launch
+   #:shell-job-confined-p
+   #:shell-confinement-refused
+   #:shell-confinement-refused-command
+   #:shell-confinement-refused-cause
+   #:confinement-description
+   #:confinement-denial-note
    ;; background jobs
    #:shell-job
    #:shell-job-id
