@@ -114,3 +114,50 @@
           (ok (= 1 (length instr)) "injected before the second generate")
           (ok (and instr (search "ROOT-RULES" (llm:turn-text (first instr)))))
           (ok (and instr (search "SRC-RULES" (llm:turn-text (first instr))))))))))
+
+(deftest agent-run-two-edits-of-one-file-in-one-step
+  ;; cl-stack-code#30: the tool calls of one step run at once. Two edits of
+  ;; one file, both reading before either writes (the rendezvous), must both
+  ;; land: each applies to what the other wrote.
+  (let ((fs (make-rendezvous-filesystem)))
+    (p:with-filesystem (fs)
+      (p:mkdir "/work" :parents t)
+      (let* ((root (make-tree (p:ensure-path "/work" :directory t)
+                              `(("f.txt" ,(nl "alpha" "middle" "omega")))))
+             (tools (make-file-tools :root root))
+             (calls 0)
+             (backend
+               (llm:make-mock-llm-backend
+                :handler (lambda (b turns &key &allow-other-keys)
+                           (declare (ignore b turns))
+                           (if (= 1 (incf calls))
+                               (llm:make-llm-response
+                                :parts (list (llm:make-llm-tool-call-part
+                                              :id "c1" :name "edit"
+                                              :arguments (json-args "file_path" "f.txt"
+                                                                    "old_string" "alpha"
+                                                                    "new_string" "ALPHA"))
+                                             (llm:make-llm-tool-call-part
+                                              :id "c2" :name "edit"
+                                              :arguments (json-args "file_path" "f.txt"
+                                                                    "old_string" "omega"
+                                                                    "new_string" "OMEGA")))
+                                :finish-reason :tool-use)
+                               (llm:make-llm-response
+                                :parts (list (llm:make-llm-text-part :text "done"))
+                                :finish-reason :stop))))))
+        (setf (rendezvous-gate fs) 2)
+        (with-agent-loop
+          (let* ((run (a:run-ai-agent (a:make-ai-agent :name "coder" :backend backend
+                                                       :tools (list tools))
+                                      "go"))
+                 (results (tool-results run))
+                 (final (nl "ALPHA" "middle" "OMEGA")))
+            (ok (eq :stop (a:agent-run-finish-reason run)))
+            (ok (= 2 (length results)))
+            (ok (notany #'result-error-p results) "both edits succeed")
+            (ok (equal final (text-at root "f.txt")) "both changes are on disk")
+            (ok (member (digest final) (mapcar (lambda (r) (result-hash (result-content r)))
+                                               results)
+                        :test #'equal)
+                "the later edit reports the file's final hash")))))))

@@ -1,5 +1,5 @@
 (defsystem "agent-tools"
-  :version "0.4.0"
+  :version "0.4.1"
   :description "Coding agent tools as ai-agent-protocol tool sources: files (read, write, edit, multi_edit, glob, grep, ls) over any cl-stack-pathlib filesystem, shell (bash, background jobs, command scanner for permissions), and supervisor units (list, search, read, tail, control their logs); shell commands optionally confined through a compute-protocol backend"
   :author "egao1980"
   :license "MIT"
@@ -14,7 +14,9 @@
                (:version "pty-backend-native" "0.2.1")
                (:version "supervisor-protocol" "0.4.0")
                (:version "supervisor-protocol/search" "0.4.0")
-               (:version "compute-protocol" "0.3.2"))
+               (:version "compute-protocol" "0.3.2")
+               ;; 0.4.1: per-path write locks (file-tools.lisp, I-serial)
+               "bordeaux-threads")
   :serial t
   :pathname "src"
   :components ((:file "package")
