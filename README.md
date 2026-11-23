@@ -32,7 +32,7 @@ Version **0.3.1**: H8c `unit-tools` (0.3.0); 0.3.1 centres a `unit_read` ref win
 | `grep` | **`pattern`**, `path`, `include`, `regex`, `case_insensitive`, `max_results` |
 | `ls` | `path` |
 
-Paths resolve under the root; anything outside it is a `path-outside-root` tool input error. A leading `\` (UNC) or drive letter (`C:`) makes a path absolute, and a segment below the root holding `:` or NUL is refused on every OS. Reads return a `hash: sha256:…` line; pass it back as `expected_hash` for a compare-and-swap write. Edits always write with compare-and-swap against the content they read, and return a unified diff. Permission resources are `path:<relative>` strings.
+Paths resolve under the root; anything outside it is a `path-outside-root` tool input error. A leading `\` (UNC) or drive letter (`C:`) makes a path absolute, and a segment below the root holding `:` or NUL is refused on every OS. Reads return a `hash: sha256:…` line; pass it back as `expected_hash` for a compare-and-swap write. Edits always write with compare-and-swap against the content they read, and return a unified diff. Calls that write one file (`write`, `edit`, `multi_edit`) run one at a time, even when an agent runs the calls of one step at once: each reads what the previous one wrote (0.4.1, [cl-stack-code#30](https://github.com/egao1980/cl-stack-code/issues/30)). The lock is per path and shared by every `file-tools` source in the image. Permission resources are `path:<relative>` strings.
 
 ## License
 

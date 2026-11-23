@@ -170,6 +170,35 @@ which is not an ERROR) FORM signals, or NIL when it returns."
     (setf (gethash "/" (p::memory-fs-root fs)) :dir)
     fs))
 
+;;; A memory filesystem whose reads meet (cl-stack-code#30): while GATE is a
+;;; count N > 0, each FS-READ-BYTES waits, up to a second, until N reads have
+;;; arrived, so tool calls that would read before any of them writes really
+;;; overlap. The first wait that times out opens the gate for every later read.
+
+(defclass rendezvous-filesystem (p:memory-filesystem)
+  ((lock :initform (bt2:make-lock :name "rendezvous") :reader %rendezvous-lock)
+   (cv :initform (bt2:make-condition-variable :name "rendezvous") :reader %rendezvous-cv)
+   (arrived :initform 0 :accessor %rendezvous-arrived)
+   (gate :initform 0 :accessor rendezvous-gate)))
+
+(defmethod p:fs-read-bytes :before ((fs rendezvous-filesystem) pathname)
+  (declare (ignore pathname))
+  (bt2:with-lock-held ((%rendezvous-lock fs))
+    (when (plusp (rendezvous-gate fs))
+      (incf (%rendezvous-arrived fs))
+      (let ((deadline (+ (get-internal-real-time) internal-time-units-per-second)))
+        (loop while (and (plusp (rendezvous-gate fs))
+                         (< (%rendezvous-arrived fs) (rendezvous-gate fs))
+                         (< (get-internal-real-time) deadline))
+              do (bt2:condition-wait (%rendezvous-cv fs) (%rendezvous-lock fs) :timeout 0.05)))
+      (setf (rendezvous-gate fs) 0)
+      (bt2:condition-broadcast (%rendezvous-cv fs)))))
+
+(defun make-rendezvous-filesystem ()
+  (let ((fs (make-instance 'rendezvous-filesystem)))
+    (setf (gethash "/" (p::memory-fs-root fs)) :dir)
+    fs))
+
 (defun make-zip-root (entries)
   "Root PATH \"/\" of a read-only zip filesystem over ENTRIES ((name text) …)."
   (p:clear-zip-filesystem-cache)

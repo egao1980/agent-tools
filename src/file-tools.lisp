@@ -16,6 +16,9 @@
 ;;;   HANDLER-BIND handler on CONTENT-HASH-MISMATCH, and nothing between the
 ;;;   write and the caller unwinds on it, so pathlib's OVERWRITE and
 ;;;   USE-CURRENT stay visible.
+;;; - I-serial: write / edit / multi_edit hold their target path's lock
+;;;   (%WITH-PATH-LOCK) from the read to the write, so calls on one file
+;;;   apply one after the other, each to what the previous one wrote.
 
 (defparameter +file-tool-names+
   '("read" "write" "edit" "multi_edit" "glob" "grep" "ls")
@@ -277,6 +280,36 @@ is dropped."
 (defun %join-lines (lines)
   (format nil "~{~a~^~%~}" lines))
 
+;;; --- one writer per path (I-serial) ----------------------------------------
+;;;
+;;; An agent runs the tool calls of one step at once, each on a worker thread.
+;;; Two edits of one file would both read the original, and pathlib's CAS
+;;; check and its rename are separate steps, so both writes could pass the
+;;; check and the second would drop the first one's change while both report
+;;; success (cl-stack-code#30). The locks are shared by every FILE-TOOLS
+;;; source in the image (two sources over one tree serialize too) and striped:
+;;; a fixed set indexed by a hash of the path, so unrelated files rarely wait
+;;; on each other and the set never grows. Recursive, so a handler that runs
+;;; inside a write (a STALE-FILE-ERROR handler choosing OVERWRITE) may call
+;;; the tools again on the same thread.
+
+(defconstant +path-lock-count+ 64)
+
+(defvar *path-locks*
+  (let ((v (make-array +path-lock-count+)))
+    (dotimes (i +path-lock-count+ v)
+      (setf (svref v i) (bt2:make-recursive-lock :name "agent-tools file write"))))
+  "The striped write locks, see %PATH-LOCK.")
+
+(defun %path-lock (path)
+  "The write lock of PATH (an absolute CL-STACK-PATHLIB:PATH)."
+  (svref *path-locks* (mod (sxhash (fs:as-posix path)) +path-lock-count+)))
+
+(defmacro %with-path-lock ((path) &body body)
+  "Run BODY holding PATH's write lock."
+  `(bt2:with-recursive-lock-held ((%path-lock ,path))
+     ,@body))
+
 ;;; --- CAS write -------------------------------------------------------------
 
 (defun %cas-write (path rel text expected)
@@ -349,13 +382,14 @@ handler, so OVERWRITE and USE-CURRENT stay available.
          (content (%arg args "content" :string :required t))
          (expected (%arg args "expected_hash" :string)))
     (multiple-value-bind (path rel) (resolve-tool-path tools arg :allow-root nil)
-      (when (fs:directory-p path)
-        (%input-error "~a is a directory; write needs a file path" rel))
-      (multiple-value-bind (hash written-p) (%cas-write path rel content expected)
-        (if written-p
-            (format nil "Wrote ~a (~d bytes)~%hash: ~a" rel (%utf8-length content) hash)
-            ;; Only when a caller chose pathlib's USE-CURRENT.
-            (format nil "Kept ~a unchanged (current content)~@[~%hash: ~a~]" rel hash))))))
+      (%with-path-lock (path)
+        (when (fs:directory-p path)
+          (%input-error "~a is a directory; write needs a file path" rel))
+        (multiple-value-bind (hash written-p) (%cas-write path rel content expected)
+          (if written-p
+              (format nil "Wrote ~a (~d bytes)~%hash: ~a" rel (%utf8-length content) hash)
+              ;; Only when a caller chose pathlib's USE-CURRENT.
+              (format nil "Kept ~a unchanged (current content)~@[~%hash: ~a~]" rel hash)))))))
 
 ;;; --- edit / multi_edit -----------------------------------------------------
 
@@ -407,28 +441,32 @@ handler, so OVERWRITE and USE-CURRENT stay available.
 
 (defun %edit-file (tools arg expected edits)
   "Apply EDITS, a list of (old new all index), to the file ARG names. One CAS
-write against the digest of the content read; nothing is written on failure."
+write against the digest of the content read, under the path's write lock
+(I-serial); nothing is written on failure."
   (multiple-value-bind (path rel) (resolve-tool-path tools arg :allow-root nil)
-    (%require-file path rel "edit needs a file" "use write to create a new file")
-    (let* ((bytes (fs:read-bytes path))
-           (hash (fs:octets-hash bytes))
-           (old-text (%decode-text bytes rel)))
-      (when (and expected (string/= expected hash))
-        (error 'stale-file-error
-               :path rel :expected expected :actual hash
-               :message (%stale-message rel expected hash)))
-      (let ((text old-text) (total 0))
-        (loop for (old new all index) in edits
-              do (multiple-value-bind (next n) (%apply-edit text old new all rel index)
-                   (setf text next)
-                   (incf total n)))
-        (let ((new-hash (%cas-write path rel text hash)))
-          (format nil "Edited ~a: ~d replacement~:p~%--- a/~a~%+++ b/~a~%~ahash: ~a"
-                  rel total rel rel
-                  (diff:render-diff (diff:compute-diff (diff:find-diff-engine :text)
-                                                       old-text text :context 3)
-                                    :unified nil)
-                  new-hash))))))
+    (multiple-value-bind (old-text text total new-hash)
+        (%with-path-lock (path)
+          (%require-file path rel "edit needs a file" "use write to create a new file")
+          (let* ((bytes (fs:read-bytes path))
+                 (hash (fs:octets-hash bytes))
+                 (old-text (%decode-text bytes rel)))
+            (when (and expected (string/= expected hash))
+              (error 'stale-file-error
+                     :path rel :expected expected :actual hash
+                     :message (%stale-message rel expected hash)))
+            (let ((text old-text) (total 0))
+              (loop for (old new all index) in edits
+                    do (multiple-value-bind (next n) (%apply-edit text old new all rel index)
+                         (setf text next)
+                         (incf total n)))
+              (values old-text text total (%cas-write path rel text hash)))))
+      ;; The diff outside the lock: the next writer need not wait for it.
+      (format nil "Edited ~a: ~d replacement~:p~%--- a/~a~%+++ b/~a~%~ahash: ~a"
+              rel total rel rel
+              (diff:render-diff (diff:compute-diff (diff:find-diff-engine :text)
+                                                   old-text text :context 3)
+                                :unified nil)
+              new-hash))))
 
 (defun %tool-edit (tools args)
   (let* ((arg (%arg args "file_path" :string :required t))
